@@ -839,100 +839,148 @@ function predictFood() {
     })
     .then(response => response.json())
     .then(data => {
-        if (data.success) {
-            const pred = data.prediction;
-            const baseCalPer100g = pred.calories;
-
-            const catKey = pred.category.toLowerCase().replace(/[^a-z\s]/g, '').trim();
-            const recMap = {
-                'low calorie':       { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', label: 'Low Calorie',       tips: ['Excellent for weight management — enjoy freely', 'Pair with a protein source for a complete meal', 'Great as a light snack between main meals', 'Supports steady energy without calorie overload'] },
-                'moderate calorie':  { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', label: 'Moderate Calorie',  tips: ['Ideal for sustained energy throughout the day', 'Best consumed at lunch for optimal metabolism', 'Suitable for active individuals and athletes', 'Keep portions around 200–300g per serving'] },
-                'high calorie':      { color: '#dc2626', bg: '#fef2f2', border: '#fca5a5', label: 'High Calorie',      tips: ['Best consumed post-workout for muscle recovery', 'Limit to one serving — avoid doubling up', 'Balance your plate with vegetables or salad', 'Avoid late-night consumption'] },
-                'very high calorie': { color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd', label: 'Very High Calorie', tips: ['Treat as an occasional indulgence only', 'Recommended for high-intensity training days', 'Split into smaller portions across the day', 'Pair with high-fiber foods to slow digestion'] }
-            };
-           const rec = recMap[catKey] || recMap['moderate calorie'];
-
-            // Detect liquid vs solid
-            const liquidList = ['chai'];
-            const solidList = ['burger', 'butter naan', 'chapati', 'chole bhature', 'dal makhani', 'dhokla', 'fried rice', 'idli', 'jalebi', 'kaathi rolls', 'kadai paneer', 'kulfi', 'masala dosa', 'momos', 'pani puri', 'pakode', 'pav bhaji', 'pizza', 'samosa'];
-            const foodLower = pred.food.toLowerCase();
-            const isLiquid = liquidList.some(l => foodLower.includes(l)) && !solidList.some(s => foodLower.includes(s));
-            const unit = isLiquid ? 'ml' : 'g';
-            const unitLabel = isLiquid ? 'per 100ml' : 'per 100g';
-
-
+        // ── INVALID IMAGE: not a food photo ─────────────────────────────────
+        if (!data.success && data.invalid) {
             analysisResult.innerHTML = `
-                <div class="pred-card">
-
-                    <!-- Top accent bar -->
-                    <div class="pred-accent-bar" style="background: ${rec.color};"></div>
-
-                    <div class="pred-body">
-
-                        <!-- Food name + badge row -->
-                        <div class="pred-name-row">
-                            <div>
-                                <div class="pred-eyebrow">IDENTIFIED FOOD</div>
-                                <b style="display:block; font-size:2.2rem; color:#0f172a; line-height:1.1; letter-spacing:-0.03em; word-break:break-word; font-family:'Inter',sans-serif;">${pred.food}</b>
-                            </div>
-                            <span class="pred-cal-badge" style="background:${rec.bg}; color:${rec.color}; border-color:${rec.border};">
-                                ${rec.label}
-                            </span>
-                        </div>
-
-                        <!-- Per-100 stat -->
-                        <div class="pred-base-stat">
-                            <span class="pred-base-num">${baseCalPer100g}</span>
-                            <span class="pred-base-unit">kcal ${unitLabel}</span>
-                        </div>
-
-                        <!-- Serving input row -->
-                        <div class="pred-gram-row">
-                            <label class="pred-gram-label">Enter serving size</label>
-                            <div class="pred-gram-input-wrap">
-                                <input
-                                    type="number"
-                                    id="gramInput"
-                                    class="pred-gram-input"
-                                    value="100"
-                                    min="1"
-                                    max="2000"
-                                    oninput="recalcCalories(${baseCalPer100g}, '${unit}')"
-                                />
-                                <span class="pred-gram-unit">${unit}</span>
-                            </div>
-                            <div class="pred-gram-result" id="gramResult">
-                                = <strong>${baseCalPer100g}</strong> kcal
-                            </div>
-                        </div>
-
-                        <!-- Divider -->
-                        <div class="pred-divider"></div>
-
-                        <!-- Recommendations -->
-                        <div class="pred-rec-title">Consumption Recommendations</div>
-                        <ul class="pred-rec-list">
-                            ${rec.tips.map(t => `<li><span class="pred-rec-dot" style="background:${rec.color};"></span>${t}</li>`).join('')}
-                        </ul>
-
+                <div style="
+                    background: #fff7ed;
+                    border: 1.5px solid #fed7aa;
+                    border-radius: 16px;
+                    padding: 2rem 1.5rem;
+                    text-align: center;
+                ">
+                    <div style="font-size: 3rem; margin-bottom: 0.75rem;">🚫</div>
+                    <div style="
+                        font-size: 1.15rem;
+                        font-weight: 700;
+                        color: #9a3412;
+                        margin-bottom: 0.5rem;
+                    ">Invalid Image</div>
+                    <div style="
+                        font-size: 0.95rem;
+                        color: #c2410c;
+                        margin-bottom: 1.25rem;
+                        line-height: 1.5;
+                    ">
+                        This does not appear to be a food photo.<br>
+                        Please upload a clear photo of a food dish.
                     </div>
-
-                    <!-- Footer -->
-                    <div class="pred-footer">
-                        <i class="fas fa-circle-info" style="color:#94a3b8;"></i>
-                        Calorie values are approximate and based on standard serving sizes
-                    </div>
-
+                    <button
+                        onclick="resetUpload()"
+                        style="
+                            background: #ea580c;
+                            color: #fff;
+                            border: none;
+                            border-radius: 8px;
+                            padding: 0.5rem 1.25rem;
+                            font-size: 0.9rem;
+                            font-weight: 600;
+                            cursor: pointer;
+                        "
+                    >
+                        📷 Try Another Image
+                    </button>
                 </div>
             `;
-        } else {
+            return;
+        }
+
+        // ── GENERAL ERROR ────────────────────────────────────────────────────
+        if (!data.success) {
             analysisResult.innerHTML = `
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-triangle me-2"></i>
                     Error: ${data.error || 'Unknown error'}
                 </div>
             `;
+            return;
         }
+
+        // ── SUCCESS: valid food prediction ───────────────────────────────────
+        const pred = data.prediction;
+        const baseCalPer100g = pred.calories;
+
+        const catKey = pred.category.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+        const recMap = {
+            'low calorie':       { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', label: 'Low Calorie',       tips: ['Excellent for weight management — enjoy freely', 'Pair with a protein source for a complete meal', 'Great as a light snack between main meals', 'Supports steady energy without calorie overload'] },
+            'moderate calorie':  { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', label: 'Moderate Calorie',  tips: ['Ideal for sustained energy throughout the day', 'Best consumed at lunch for optimal metabolism', 'Suitable for active individuals and athletes', 'Keep portions around 200–300g per serving'] },
+            'high calorie':      { color: '#dc2626', bg: '#fef2f2', border: '#fca5a5', label: 'High Calorie',      tips: ['Best consumed post-workout for muscle recovery', 'Limit to one serving — avoid doubling up', 'Balance your plate with vegetables or salad', 'Avoid late-night consumption'] },
+            'very high calorie': { color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd', label: 'Very High Calorie', tips: ['Treat as an occasional indulgence only', 'Recommended for high-intensity training days', 'Split into smaller portions across the day', 'Pair with high-fiber foods to slow digestion'] }
+        };
+        const rec = recMap[catKey] || recMap['moderate calorie'];
+
+        // Detect liquid vs solid
+        const liquidList = ['chai'];
+        const solidList = ['burger', 'butter naan', 'chapati', 'chole bhature', 'dal makhani', 'dhokla', 'fried rice', 'idli', 'jalebi', 'kaathi rolls', 'kadai paneer', 'kulfi', 'masala dosa', 'momos', 'pani puri', 'pakode', 'pav bhaji', 'pizza', 'samosa'];
+        const foodLower = pred.food.toLowerCase();
+        const isLiquid = liquidList.some(l => foodLower.includes(l)) && !solidList.some(s => foodLower.includes(s));
+        const unit = isLiquid ? 'ml' : 'g';
+        const unitLabel = isLiquid ? 'per 100ml' : 'per 100g';
+
+        analysisResult.innerHTML = `
+            <div class="pred-card">
+
+                <!-- Top accent bar -->
+                <div class="pred-accent-bar" style="background: ${rec.color};"></div>
+
+                <div class="pred-body">
+
+                    <!-- Food name + badge row -->
+                    <div class="pred-name-row">
+                        <div>
+                            <div class="pred-eyebrow">IDENTIFIED FOOD</div>
+                            <b style="display:block; font-size:2.2rem; color:#0f172a; line-height:1.1; letter-spacing:-0.03em; word-break:break-word; font-family:'Inter',sans-serif;">${pred.food}</b>
+                        </div>
+                        <span class="pred-cal-badge" style="background:${rec.bg}; color:${rec.color}; border-color:${rec.border};">
+                            ${rec.label}
+                        </span>
+                    </div>
+
+                    <!-- Per-100 stat -->
+                    <div class="pred-base-stat">
+                        <span class="pred-base-num">${baseCalPer100g}</span>
+                        <span class="pred-base-unit">kcal ${unitLabel}</span>
+                    </div>
+
+                    <!-- Serving input row -->
+                    <div class="pred-gram-row">
+                        <label class="pred-gram-label">Enter serving size</label>
+                        <div class="pred-gram-input-wrap">
+                            <input
+                                type="number"
+                                id="gramInput"
+                                class="pred-gram-input"
+                                value="100"
+                                min="1"
+                                max="2000"
+                                oninput="recalcCalories(${baseCalPer100g}, '${unit}')"
+                            />
+                            <span class="pred-gram-unit">${unit}</span>
+                        </div>
+                        <div class="pred-gram-result" id="gramResult">
+                            = <strong>${baseCalPer100g}</strong> kcal
+                        </div>
+                    </div>
+
+                    <!-- Divider -->
+                    <div class="pred-divider"></div>
+
+                    <!-- Recommendations -->
+                    <div class="pred-rec-title">Consumption Recommendations</div>
+                    <ul class="pred-rec-list">
+                        ${rec.tips.map(t => `<li><span class="pred-rec-dot" style="background:${rec.color};"></span>${t}</li>`).join('')}
+                    </ul>
+
+                </div>
+
+                <!-- Footer -->
+                <div class="pred-footer">
+                    <i class="fas fa-circle-info" style="color:#94a3b8;"></i>
+                    Calorie values are approximate and based on standard serving sizes
+                </div>
+
+            </div>
+        `;
     })
     .catch(error => {
         console.error('Error:', error);
@@ -944,6 +992,7 @@ function predictFood() {
         `;
     });
 }
+
 function recalcCalories(basePer100, unit) {
     const amount = parseFloat(document.getElementById('gramInput')?.value) || 100;
     const total = Math.round((basePer100 / 100) * amount);

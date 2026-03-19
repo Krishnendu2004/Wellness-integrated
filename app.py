@@ -584,6 +584,85 @@ def predict_from_filename(filename):
 # KEY: Model has Rescaling(1./255) as first layer.
 # Pass raw 0-255 pixel values — do NOT divide by 255 manually.
 # ============================================
+
+# ── Validity thresholds ──────────────────────────────────────────────────────
+# CONFIDENCE_THRESHOLD : top-class probability must be AT LEAST this.
+#   Raise (e.g. 0.50) if non-food images still slip through.
+#   Lower (e.g. 0.25) if valid food photos are wrongly rejected.
+CONFIDENCE_THRESHOLD = 0.35
+
+# ENTROPY_THRESHOLD : normalised entropy of the full softmax distribution.
+#   A food image concentrates probability → low entropy.
+#   A random / non-food image spreads probability → high entropy.
+#   Values are in [0, 1].  Reject when entropy > this value.
+#   Lower (e.g. 0.70) to be stricter; raise (e.g. 0.90) to be more lenient.
+ENTROPY_THRESHOLD = 0.80
+
+def pre_validate_image(img_array_raw):
+    """
+    Fast pixel-level sanity check BEFORE running the model.
+    Catches screenshots, diagrams, text pages, solid-colour images, etc.
+
+    img_array_raw : numpy array shape (256, 256, 3), dtype float32, range 0-255.
+    Returns (is_valid: bool, reason: str)
+    """
+    pixels = img_array_raw.astype(np.float32)
+
+    # 1. Reject near-white images (text documents, screenshots)
+    mean_brightness = float(np.mean(pixels))
+    if mean_brightness > 230:
+        return False, f"image too bright/white (mean {mean_brightness:.0f}) — looks like a document or screenshot"
+    if mean_brightness < 15:
+        return False, f"image too dark (mean {mean_brightness:.0f})"
+
+    # 2. Reject low-variance images (diagrams, solid fills, text pages)
+    std_all = float(np.std(pixels))
+    if std_all < 20:
+        return False, f"image has very low variance ({std_all:.1f}) — likely a diagram or solid colour"
+
+    # 3. Check colour diversity — food photos use a wide colour range
+    std_r = float(np.std(pixels[:, :, 0]))
+    std_g = float(np.std(pixels[:, :, 1]))
+    std_b = float(np.std(pixels[:, :, 2]))
+    avg_color_std = (std_r + std_g + std_b) / 3
+    if avg_color_std < 18:
+        return False, f"image lacks colour diversity (avg channel std {avg_color_std:.1f}) — likely a diagram or screenshot"
+
+    # 4. Reject high white-pixel ratio (text documents, screenshots)
+    white_mask = np.all(pixels > 220, axis=2)
+    white_ratio = float(np.mean(white_mask))
+    if white_ratio > 0.55:
+        return False, f"too many white pixels ({white_ratio*100:.0f}%) — likely a document/screenshot"
+
+    print(f"   ✅ Pre-validation passed — brightness={mean_brightness:.0f}, std={std_all:.1f}, colour_std={avg_color_std:.1f}, white={white_ratio*100:.0f}%")
+    return True, "ok"
+
+
+def is_valid_food_image(predictions):
+    """
+    Returns (is_valid: bool, reason: str, confidence: float, entropy: float).
+
+    Two independent checks must BOTH pass:
+      1. Top-class confidence  >= CONFIDENCE_THRESHOLD
+      2. Normalised entropy    <= ENTROPY_THRESHOLD
+    """
+    top_confidence = float(np.max(predictions))
+
+    # Normalised Shannon entropy: H / log(N)  →  range [0, 1]
+    n = len(predictions)
+    probs = np.clip(predictions, 1e-10, 1.0)          # avoid log(0)
+    entropy = float(-np.sum(probs * np.log(probs)) / np.log(n))
+
+    print(f"   🔎 Confidence: {top_confidence*100:.1f}%  |  Normalised entropy: {entropy:.3f}")
+
+    if top_confidence < CONFIDENCE_THRESHOLD:
+        return False, f"confidence too low ({round(top_confidence*100,1)}%)", top_confidence, entropy
+
+    if entropy > ENTROPY_THRESHOLD:
+        return False, f"prediction too uncertain (entropy {round(entropy,3)})", top_confidence, entropy
+
+    return True, "ok", top_confidence, entropy
+
 @app.route('/api/predict_image', methods=['POST'])
 def predict_image():
     if 'food_image' not in request.files:
@@ -625,7 +704,18 @@ def predict_image():
         img_array = np.array(img, dtype=np.float32)       # range: 0–255, NOT divided
         img_array = np.expand_dims(img_array, axis=0)     # shape: (1, 256, 256, 3)
 
-        print(f"   Shape: {img_array.shape}, Range: {img_array.min():.0f}–{img_array.max():.0f}")
+        print(f"   Shape: {img_array.shape}, Range: {img_array.min():.0f}\u2013{img_array.max():.0f}")
+
+        # ── Pre-validate pixel statistics BEFORE running the model ──────────────
+        pre_valid, pre_reason = pre_validate_image(img_array[0])
+        if not pre_valid:
+            print(f"\u26a0\ufe0f Pre-validation rejected image \u2014 {pre_reason}")
+            return jsonify({
+                'success': False,
+                'invalid': True,
+                'error': "This does not appear to be a food photo. Please upload a clear photo of a food dish.",
+                'detail': pre_reason
+            })
 
         # ── Predict ──
         predictions = IMAGE_MODEL.predict(img_array, verbose=0)[0]
@@ -638,14 +728,27 @@ def predict_image():
                 print(f"   {i+1}. {CLASS_NAMES[idx]}: {predictions[idx]*100:.1f}%")
 
         top_idx = int(np.argmax(predictions))
-        top_confidence = float(predictions[top_idx])
 
         if top_idx >= len(CLASS_NAMES):
             raise ValueError(f"Prediction index {top_idx} out of range ({len(CLASS_NAMES)} classes)")
 
+        # ── Dual validity check: confidence + entropy ──────────────────────────
+        valid, reason, top_confidence, entropy = is_valid_food_image(predictions)
+        if not valid:
+            print(f"⚠️ Invalid image rejected — {reason}")
+            return jsonify({
+                'success': False,
+                'invalid': True,
+                'error': (
+                    "This image does not appear to be a recognized food item. "
+                    "Please upload a clear photo of a food dish."
+                ),
+                'detail': reason
+            })
+
         predicted_class = CLASS_NAMES[top_idx]
         predicted_food = predicted_class.replace('_', ' ').title()
-        print(f"✅ Predicted: {predicted_food} ({top_confidence*100:.1f}% confidence)")
+        print(f"✅ Predicted: {predicted_food} ({top_confidence*100:.1f}% confidence | entropy {entropy:.3f})")
 
         # ── Calorie lookup ──
         calories = get_calories_for_food(predicted_class)
@@ -656,7 +759,8 @@ def predict_image():
                 'food': predicted_food,
                 'calories': int(calories),
                 'category': get_category(calories),
-                'confidence': round(top_confidence * 100, 1)
+                'confidence': round(top_confidence * 100, 1),
+                'entropy': round(entropy, 3)
             }
         })
 
