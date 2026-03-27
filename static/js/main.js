@@ -608,7 +608,8 @@ function displayMealPlan(mealPlan, totals) {
     let html = `
         <div class="col-12 mb-4">
             <div class="result-card p-4">
-                <h4 class="mb-3 text-white">Daily Nutrition Summary</h4>
+                <h4 class="mb-1 text-white">Planned Intake Summary</h4>
+                <div class="small text-white-50 mb-3">Totals from generated meals</div>
                 <div class="row text-center">
                     <div class="col-3">
                         <div class="text-white">
