@@ -23,6 +23,40 @@ function showToast(message, isError = false) {
     }, 3000);
 }
 
+// Status banner for non-devtools debugging
+function setStatusBanner(message, level = 'ok', force = false) {
+    const banner = document.getElementById('statusBanner');
+    if (!banner) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const debug = params.get('debug') === '1';
+
+    if (!debug && !force && level === 'ok') {
+        return;
+    }
+
+    banner.textContent = message;
+    banner.className = `status-banner show ${level}`;
+}
+
+function checkApiHealth() {
+    fetch('/api/check_model')
+        .then(response => {
+            if (!response.ok) throw new Error(`check_model ${response.status}`);
+            return response.json();
+        })
+        .then(data => {
+            if (data && data.success) {
+                setStatusBanner('API connected. Models loaded successfully.', 'ok');
+            } else {
+                setStatusBanner('API responded, but reported an issue with models.', 'warn', true);
+            }
+        })
+        .catch(err => {
+            setStatusBanner(`API error: ${err.message}`, 'error', true);
+        });
+}
+
 // Helper functions for position display
 function getPositionEmoji(position) {
     const emojis = {
@@ -51,7 +85,9 @@ function getPositionName(position) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     console.log('✅ DOM loaded - initializing app...');
-    
+
+    checkApiHealth();
+
     // Load cuisines
     loadCuisines();
     
@@ -160,7 +196,10 @@ function updateProfileDisplay() {
 // ============================================
 function loadCuisines() {
     fetch('/api/cuisines')
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) throw new Error(`cuisines ${response.status}`);
+            return response.json();
+        })
         .then(data => {
             if (data.success && data.cuisines) {
                 const cuisineSelect = document.getElementById('cuisine');
@@ -178,7 +217,10 @@ function loadCuisines() {
                 }
             }
         })
-        .catch(error => console.error('Error loading cuisines:', error));
+        .catch(error => {
+            console.error('Error loading cuisines:', error);
+            setStatusBanner(`Failed to load cuisines: ${error.message}`, 'error', true);
+        });
 }
 
 // ============================================
@@ -225,7 +267,10 @@ function loadFoodRecommendations() {
     }
     
     fetch(url)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) throw new Error(`get_foods ${response.status}`);
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
                 displayFoodRecommendations(data.foods);
@@ -236,6 +281,7 @@ function loadFoodRecommendations() {
             if (container) {
                 container.innerHTML = '<div class="text-center py-5 text-danger" style="grid-column: 1 / -1;">Error loading foods</div>';
             }
+            setStatusBanner(`Failed to load foods: ${error.message}`, 'error', true);
         });
 }
 
@@ -456,7 +502,10 @@ function calculateNutrition() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) throw new Error(`calculate_nutrition ${response.status}`);
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
             // Update nutrition results
@@ -539,6 +588,7 @@ function calculateNutrition() {
     .catch(error => {
         console.error('Error:', error);
         showToast('Error connecting to server', true);
+        setStatusBanner(`Nutrition API failed: ${error.message}`, 'error', true);
     });
 }
 
@@ -838,7 +888,10 @@ function predictFood() {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) throw new Error(`predict_image ${response.status}`);
+        return response.json();
+    })
     .then(data => {
         // ── INVALID IMAGE: not a food photo ─────────────────────────────────
         if (!data.success && data.invalid) {
@@ -991,6 +1044,7 @@ function predictFood() {
                 Failed to analyze image
             </div>
         `;
+        setStatusBanner(`Image prediction failed: ${error.message}`, 'error', true);
     });
 }
 
@@ -1035,3 +1089,4 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
         }
     });
 });
+
