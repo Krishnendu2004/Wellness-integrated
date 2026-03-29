@@ -295,11 +295,30 @@ def calculate_macros_traditional(calories, weight, goal, position):
         'fat': round(max(fat, 0))
     }
 
+def normalize_macros_to_calories(target_calories, macros):
+    """Scale macro grams so their calorie sum matches target_calories."""
+    try:
+        p = float(macros.get('protein', 0) or 0)
+        c = float(macros.get('carbs', 0) or 0)
+        f = float(macros.get('fat', 0) or 0)
+        macro_cals = (p * 4) + (c * 4) + (f * 9)
+        if macro_cals <= 0:
+            return macros
+        scale = float(target_calories) / macro_cals if target_calories > 0 else 1.0
+        return {
+            'protein': max(0, int(round(p * scale))),
+            'carbs': max(0, int(round(c * scale))),
+            'fat': max(0, int(round(f * scale)))
+        }
+    except Exception:
+        return macros
+
 # ============================================
 # MEAL PLAN GENERATION
 # ============================================
 def generate_position_based_meal_plan(user_data):
     calories = user_data['target_calories']
+    target_macros = user_data.get('target_macros', {})
     preference = user_data.get('preference', 'all')
     cuisine = user_data.get('cuisine', 'All')
     position = user_data.get('position', 'midfielder')
@@ -338,17 +357,32 @@ def generate_position_based_meal_plan(user_data):
         if not candidates:
             candidates = [f for f in suitable if f['name'] not in used]
         if candidates:
+            # Position-aware scoring to diversify plans by role
+            pos_weights = {
+                'goalkeeper': {'protein': 0.45, 'carbs': 0.25, 'fat': 0.30},
+                'defender':   {'protein': 0.40, 'carbs': 0.30, 'fat': 0.30},
+                'midfielder': {'protein': 0.25, 'carbs': 0.55, 'fat': 0.20},
+                'forward':    {'protein': 0.30, 'carbs': 0.50, 'fat': 0.20},
+                'athlete':    {'protein': 0.35, 'carbs': 0.40, 'fat': 0.25},
+                'sedentary':  {'protein': 0.30, 'carbs': 0.30, 'fat': 0.40}
+            }
+            w = pos_weights.get(position, pos_weights['midfielder'])
+
+            scored = []
             for food in candidates:
                 calorie_score = 1 - min(abs(food['calories'] - target) / target, 1)
-                focus_score = 0
-                if meal['focus'] == 'protein':
-                    focus_score = min(food['protein'] / 30, 1)
-                elif meal['focus'] == 'energy':
-                    focus_score = min(food['carbs'] / 50, 1) * 0.7
-                elif meal['focus'] == 'balanced':
-                    focus_score = (min(food['protein'] / 25, 1) + min(food['carbs'] / 40, 1)) / 2
-                food['score'] = calorie_score * 0.6 + focus_score * 0.4
-            best = max(candidates, key=lambda x: x.get('score', 0))
+                protein_score = min(food['protein'] / 30, 1)
+                carbs_score = min(food['carbs'] / 50, 1)
+                fat_score = min(food['fat'] / 20, 1)
+
+                focus_score = (protein_score * w['protein']) + (carbs_score * w['carbs']) + (fat_score * w['fat'])
+                score = calorie_score * 0.55 + focus_score * 0.45
+                scored.append((score, food))
+
+            # Choose among top candidates to avoid same picks across positions
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_k = scored[:max(3, min(6, len(scored)))]
+            best = random.choice([f for _, f in top_k])
             used.add(best['name'])
             meal_plan.append({
                 'meal': meal['name'],
@@ -367,6 +401,51 @@ def generate_position_based_meal_plan(user_data):
                 'carbs': round(target * 0.5 / 4),
                 'fat': round(target * 0.25 / 9)
             })
+
+    # Scale meal plan to better match target calories
+    total_cal = sum(m['calories'] for m in meal_plan)
+    if total_cal > 0:
+        scale = calories / total_cal
+        for m in meal_plan:
+            m['calories'] = int(round(m['calories'] * scale))
+            m['protein'] = int(round(m['protein'] * scale))
+            m['carbs'] = int(round(m['carbs'] * scale))
+            m['fat'] = int(round(m['fat'] * scale))
+        # Minor correction to hit target calories exactly
+        diff = calories - sum(m['calories'] for m in meal_plan)
+        if diff != 0 and meal_plan:
+            meal_plan[0]['calories'] += diff
+
+    # Best-balance macros: keep calories consistent, then distribute macros by target ratios
+    try:
+        target_p = float(target_macros.get('protein', 0) or 0)
+        target_c = float(target_macros.get('carbs', 0) or 0)
+        target_f = float(target_macros.get('fat', 0) or 0)
+        total_cal = sum(m['calories'] for m in meal_plan)
+        if total_cal > 0 and (target_p + target_c + target_f) > 0:
+            p_ratio = (target_p * 4) / calories if calories > 0 else 0
+            c_ratio = (target_c * 4) / calories if calories > 0 else 0
+            f_ratio = (target_f * 9) / calories if calories > 0 else 0
+
+            for m in meal_plan:
+                meal_cal = m['calories']
+                m['protein'] = int(round((meal_cal * p_ratio) / 4)) if p_ratio > 0 else m['protein']
+                m['carbs'] = int(round((meal_cal * c_ratio) / 4)) if c_ratio > 0 else m['carbs']
+                m['fat'] = int(round((meal_cal * f_ratio) / 9)) if f_ratio > 0 else m['fat']
+                m['protein'] = max(0, int(m['protein']))
+                m['carbs'] = max(0, int(m['carbs']))
+                m['fat'] = max(0, int(m['fat']))
+
+            # Final correction to match macro totals closely
+            if meal_plan:
+                dp = int(round(target_p - sum(m['protein'] for m in meal_plan)))
+                dc = int(round(target_c - sum(m['carbs'] for m in meal_plan)))
+                df = int(round(target_f - sum(m['fat'] for m in meal_plan)))
+                meal_plan[0]['protein'] += dp
+                meal_plan[0]['carbs'] += dc
+                meal_plan[0]['fat'] += df
+    except Exception:
+        pass
     return meal_plan
 
 # ============================================
@@ -461,13 +540,20 @@ def calculate_nutrition():
         tdee = calculate_tdee(bmr, activity)
         target_calories = calculate_target_calories(tdee, goal)
         macros = calculate_macros_with_model(target_calories, weight, height, age, gender, activity, goal, position)
-        user_data = {'target_calories': target_calories, 'preference': preference, 'cuisine': cuisine, 'position': position}
+        macros = normalize_macros_to_calories(target_calories, macros)
+        user_data = {
+            'target_calories': target_calories,
+            'target_macros': macros,
+            'preference': preference,
+            'cuisine': cuisine,
+            'position': position
+        }
         meal_plan = generate_position_based_meal_plan(user_data)
         totals = {
-            'calories': sum(m['calories'] for m in meal_plan),
-            'protein': sum(m['protein'] for m in meal_plan),
-            'carbs': sum(m['carbs'] for m in meal_plan),
-            'fat': sum(m['fat'] for m in meal_plan)
+            'calories': int(round(sum(m['calories'] for m in meal_plan))),
+            'protein': int(round(sum(m['protein'] for m in meal_plan))),
+            'carbs': int(round(sum(m['carbs'] for m in meal_plan))),
+            'fat': int(round(sum(m['fat'] for m in meal_plan)))
         }
         bmi_data = calculate_bmi(height, weight)
         ideal_weight = calculate_ideal_weight(height, gender)
@@ -589,14 +675,14 @@ def predict_from_filename(filename):
 # CONFIDENCE_THRESHOLD : top-class probability must be AT LEAST this.
 #   Raise (e.g. 0.50) if non-food images still slip through.
 #   Lower (e.g. 0.25) if valid food photos are wrongly rejected.
-CONFIDENCE_THRESHOLD = 0.35
+CONFIDENCE_THRESHOLD = 0.50
 
 # ENTROPY_THRESHOLD : normalised entropy of the full softmax distribution.
 #   A food image concentrates probability → low entropy.
 #   A random / non-food image spreads probability → high entropy.
 #   Values are in [0, 1].  Reject when entropy > this value.
 #   Lower (e.g. 0.70) to be stricter; raise (e.g. 0.90) to be more lenient.
-ENTROPY_THRESHOLD = 0.80
+ENTROPY_THRESHOLD = 0.70
 
 def pre_validate_image(img_array_raw):
     """
@@ -628,10 +714,10 @@ def pre_validate_image(img_array_raw):
     if avg_color_std < 18:
         return False, f"image lacks colour diversity (avg channel std {avg_color_std:.1f}) — likely a diagram or screenshot"
 
-    # 4. Reject high white-pixel ratio (text documents, screenshots)
+    # 4. Reject high white-pixel ratio (text documents, screenshots, UI-heavy images)
     white_mask = np.all(pixels > 220, axis=2)
     white_ratio = float(np.mean(white_mask))
-    if white_ratio > 0.55:
+    if white_ratio > 0.40 and mean_brightness > 120:
         return False, f"too many white pixels ({white_ratio*100:.0f}%) — likely a document/screenshot"
 
     print(f"   ✅ Pre-validation passed — brightness={mean_brightness:.0f}, std={std_all:.1f}, colour_std={avg_color_std:.1f}, white={white_ratio*100:.0f}%")
@@ -850,4 +936,4 @@ if __name__ == '__main__':
     print(f"   • Food Dataset: {len(FOOD_DATASET)} items")
     print("\n✅ Server ready at http://localhost:5000")
     print("=" * 80)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5001)

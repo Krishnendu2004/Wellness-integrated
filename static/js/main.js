@@ -322,23 +322,17 @@ function displayFoodRecommendations(foods) {
                     <span class="${categoryClass}">${category}</span>
                     <span class="${typeClass}">${typeLabel}</span>
                 </div>
-                
-                <div class="food-nutrients">
-                    <div class="nutrient">
-                        <div class="nutrient-value">${food.calories}</div>
-                        <div class="nutrient-label">kcal</div>
+
+                <div class="macro-mini">
+                    <div class="macro-bar">
+                        <div class="macro-seg protein" style="width:${(food.protein * 4 / Math.max(food.calories, 1) * 100).toFixed(1)}%"></div>
+                        <div class="macro-seg carbs" style="width:${(food.carbs * 4 / Math.max(food.calories, 1) * 100).toFixed(1)}%"></div>
+                        <div class="macro-seg fat" style="width:${(food.fat * 9 / Math.max(food.calories, 1) * 100).toFixed(1)}%"></div>
                     </div>
-                    <div class="nutrient">
-                        <div class="nutrient-value">${food.protein}g</div>
-                        <div class="nutrient-label">P</div>
-                    </div>
-                    <div class="nutrient">
-                        <div class="nutrient-value">${food.carbs}g</div>
-                        <div class="nutrient-label">C</div>
-                    </div>
-                    <div class="nutrient">
-                        <div class="nutrient-value">${food.fat}g</div>
-                        <div class="nutrient-label">F</div>
+                    <div class="macro-legend">
+                        <span><span class="macro-dot protein"></span>Protein</span>
+                        <span><span class="macro-dot carbs"></span>Carbs</span>
+                        <span><span class="macro-dot fat"></span>Fat</span>
                     </div>
                 </div>
             </div>
@@ -651,9 +645,6 @@ function displayMealPlan(mealPlan, totals) {
     
     // Calculate percentages
     const totalCalories = totals.calories;
-    const proteinPercent = ((totals.protein * 4 / totalCalories) * 100).toFixed(1);
-    const carbsPercent = ((totals.carbs * 4 / totalCalories) * 100).toFixed(1);
-    const fatPercent = ((totals.fat * 9 / totalCalories) * 100).toFixed(1);
     
     let html = `
         <div class="col-12 mb-4">
@@ -671,28 +662,20 @@ function displayMealPlan(mealPlan, totals) {
                         <div class="text-white">
                             <div class="fs-2 fw-bold">${totals.protein}g</div>
                             <div class="small opacity-75">Protein</div>
-                            <div class="small opacity-75">${proteinPercent}%</div>
                         </div>
                     </div>
                     <div class="col-3">
                         <div class="text-white">
                             <div class="fs-2 fw-bold">${totals.carbs}g</div>
                             <div class="small opacity-75">Carbs</div>
-                            <div class="small opacity-75">${carbsPercent}%</div>
                         </div>
                     </div>
                     <div class="col-3">
                         <div class="text-white">
                             <div class="fs-2 fw-bold">${totals.fat}g</div>
                             <div class="small opacity-75">Fat</div>
-                            <div class="small opacity-75">${fatPercent}%</div>
                         </div>
                     </div>
-                </div>
-                <div class="progress mt-3" style="height: 8px; background: rgba(255,255,255,0.2);">
-                    <div class="progress-bar" style="width: ${proteinPercent}%; background: #4361ee;"></div>
-                    <div class="progress-bar" style="width: ${carbsPercent}%; background: #06d6a0;"></div>
-                    <div class="progress-bar" style="width: ${fatPercent}%; background: #ffd166;"></div>
                 </div>
             </div>
         </div>
@@ -729,14 +712,11 @@ function displayMealPlan(mealPlan, totals) {
     mealPlan.forEach(meal => {
         const mealIcon = mealIcons[meal.meal] || '🍽️';
         const mealColor = mealColors[meal.meal] || '#4361ee';
-        const mealCalPercent = ((meal.calories / totalCalories) * 100).toFixed(1);
-        
         html += `
             <div class="col-md-6 mb-3">
                 <div class="meal-plan-card" style="border-left-color: ${mealColor};">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <div class="meal-time" style="color: ${mealColor};">${mealIcon} ${meal.meal}</div>
-                        <span class="badge" style="background: ${mealColor};">${mealCalPercent}%</span>
                     </div>
                     <div class="meal-name">${meal.food}</div>
                     <div class="meal-nutrients">
@@ -757,10 +737,17 @@ function displayMealPlan(mealPlan, totals) {
                             <span><strong>${meal.fat}g</strong> F</span>
                         </div>
                     </div>
-                    <div class="progress mt-2" style="height: 4px; background: #e2e8f0;">
-                        <div class="progress-bar" style="width: ${(meal.protein * 4 / meal.calories * 100)}%; background: ${mealColor};"></div>
-                        <div class="progress-bar" style="width: ${(meal.carbs * 4 / meal.calories * 100)}%; background: #06d6a0;"></div>
-                        <div class="progress-bar" style="width: ${(meal.fat * 9 / meal.calories * 100)}%; background: #ffd166;"></div>
+                    <div class="macro-mini">
+                        <div class="macro-bar">
+                            <div class="macro-seg protein" style="width:${(meal.protein * 4 / Math.max(meal.calories, 1) * 100).toFixed(1)}%"></div>
+                            <div class="macro-seg carbs" style="width:${(meal.carbs * 4 / Math.max(meal.calories, 1) * 100).toFixed(1)}%"></div>
+                            <div class="macro-seg fat" style="width:${(meal.fat * 9 / Math.max(meal.calories, 1) * 100).toFixed(1)}%"></div>
+                        </div>
+                        <div class="macro-legend">
+                            <span><span class="macro-dot protein"></span>Protein</span>
+                            <span><span class="macro-dot carbs"></span>Carbs</span>
+                            <span><span class="macro-dot fat"></span>Fat</span>
+                        </div>
                     </div>
                 </div>
             </div>
